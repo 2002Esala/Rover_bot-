@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+
+import rospy
+from std_msgs.msg import Float64MultiArray
+from sensor_msgs.msg import Imu
+import tf_conversions
+import tf2_ros
+import math
+
+# Global variables to store orientation
+current_time = None
+previous_time = None
+gyro_x_prev = 0.0
+gyro_y_prev = 0.0
+gyro_z_prev = 0.0
+roll = 0.0
+pitch = 0.0
+yaw = 0.0
+
+def imu_callback(data):
+    global current_time, previous_time, gyro_x_prev, gyro_y_prev, gyro_z_prev, roll, pitch, yaw
+
+    array_data = data.data
+    gyro_x = array_data[3]
+    gyro_y = array_data[4]
+    gyro_z = array_data[5]
+
+    current_time = rospy.Time.now()
+
+    if previous_time is None:
+        previous_time = current_time
+        gyro_x_prev = gyro_x
+        gyro_y_prev = gyro_y
+        gyro_z_prev = gyro_z
+        return
+
+    dt = (current_time - previous_time).to_sec()
+    
+    # Calculate the change in angles using the gyroscope data (Integration)
+    roll += (gyro_x + gyro_x_prev) * dt / 2.0
+    pitch += (gyro_y + gyro_y_prev) * dt / 2.0
+    yaw += (gyro_z + gyro_z_prev) * dt / 2.0
+
+    # Update previous values for the next iteration
+    previous_time = current_time
+    gyro_x_prev = gyro_x
+    gyro_y_prev = gyro_y
+    gyro_z_prev = gyro_z
+
+    # Convert Euler angles to Quaternion
+    quaternion = tf_conversions.transformations.quaternion_from_euler(roll, pitch, yaw)
+
+    # Create the IMU message
+    imu_msg = Imu()
+    imu_msg.header.stamp = current_time
+    imu_msg.header.frame_id = "imu_link"
+    imu_msg.orientation.x = quaternion[0]
+    imu_msg.orientation.y = quaternion[1]
+    imu_msg.orientation.z = quaternion[2]
+    imu_msg.orientation.w = quaternion[3]
+    # You can also set other fields like linear_acceleration, angular_velocity, etc. if available
+
+    # Publish the IMU message
+    imu_pub.publish(imu_msg)
+
+if __name__ == '__main__':
+    rospy.init_node('imu_node', anonymous=True)
+    rospy.Subscriber('imu_array', Float64MultiArray, imu_callback)  # Subscribe to the Arduino data topic
+
+    # Create a publisher for IMU data
+    imu_pub = rospy.Publisher('/imu/data', Imu, queue_size=1)
+
+    # Initialize the tf2 broadcaster
+    br = tf2_ros.TransformBroadcaster()
+
+    rospy.spin()
